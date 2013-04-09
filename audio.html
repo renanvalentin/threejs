@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>three.js canvas - particles - waves</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            background-color: #fafafa;
+            margin: 0px;
+            overflow: hidden;
+        }
+
+        a {
+            color: #0078ff;
+        }
+    </style>
+</head>
+<body>
+    <script src="three.js"></script>
+
+    <script src="js/ImprovedNoise.js"></script>
+    <script src="js/Detector.js"></script>
+    <script src="js/libs/stats.min.js"></script>
+
+    <script>
+
+        var SEPARATION = 100, AMOUNTX = 50, AMOUNTY = 50;
+
+        var container, stats;
+        var camera, scene, renderer;
+
+        var particles, particle, count = 0;
+
+        var mouseX = 0, mouseY = 0;
+
+        var windowHalfX = window.innerWidth / 2;
+        var windowHalfY = window.innerHeight / 2;
+
+        var cube;
+
+        init();
+        animate();
+
+        function init() {
+
+            if (Detector.webgl) {
+                renderer = new THREE.WebGLRenderer({
+                    antialias: true,	// to get smoother output
+                    preserveDrawingBuffer: true	// to allow screenshot
+                });
+                renderer.setClearColorHex(0xfafafa, 1);
+                // uncomment if webgl is required
+                //}else{
+                //	Detector.addGetWebGLMessage();
+                //	return true;
+            } else {
+                renderer = new THREE.CanvasRenderer();
+            }
+
+            container = document.createElement('div');
+            document.body.appendChild(container);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 10000);
+            camera.position.y = 120;
+            camera.position.z = 450;
+
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0xfafafa, 0.0030);
+
+            particles = new Array();
+
+            var PI2 = Math.PI * 2;
+            var material = new THREE.ParticleCanvasMaterial({
+
+                color: 0xffffff,
+                program: function (context) {
+
+                    context.beginPath();
+                    context.arc(0, 0, 1, 0, PI2, true);
+                    context.fill();
+
+                }
+
+            });
+
+            createFloor();
+            createTriangles();
+
+            var geometry = new THREE.CubeGeometry(200, 200, 200);
+
+            for (var i = 0; i < geometry.faces.length; i++) {
+
+                geometry.faces[i].color.setHex(Math.random() * 0xffffff);
+
+            }
+
+            var material = new THREE.MeshPhongMaterial({ vertexColors: THREE.FaceColors });
+
+            cube = new THREE.Mesh(geometry, material);
+            cube.position.y = 100;
+            scene.add(cube);
+
+         
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            stats = new Stats();
+            stats.domElement.style.position = 'absolute';
+            stats.domElement.style.top = '0px';
+            //container.appendChild(stats.domElement);
+
+            //// add subtle ambient lighting
+            //light = new THREE.DirectionalLight(0xffffff);
+            //light.position.set(0, 100, 110);
+            //scene.add(light);
+
+            // LIGHTS
+
+            hemiLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6);
+            hemiLight.color.setHSL(0.6, 1, 0.6);
+            hemiLight.groundColor.setHSL(0.095, 1, 0.75);
+            hemiLight.position.set(0, 500, 0);
+            scene.add(hemiLight);
+
+            //
+
+            dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.color.setHSL(0.1, 1, 0.95);
+            dirLight.position.set(-1, 1.75, 1);
+            dirLight.position.multiplyScalar(50);
+            scene.add(dirLight);
+
+            dirLight.castShadow = true;
+
+            dirLight.shadowMapWidth = 2048;
+            dirLight.shadowMapHeight = 2048;
+
+            var d = 50;
+
+            dirLight.shadowCameraLeft = -d;
+            dirLight.shadowCameraRight = d;
+            dirLight.shadowCameraTop = d;
+            dirLight.shadowCameraBottom = -d;
+
+            dirLight.shadowCameraFar = 3500;
+            dirLight.shadowBias = -0.0001;
+            dirLight.shadowDarkness = 0.35;
+
+            document.addEventListener('mousemove', onDocumentMouseMove, false);
+            document.addEventListener('touchstart', onDocumentTouchStart, false);
+            document.addEventListener('touchmove', onDocumentTouchMove, false);
+
+            //
+
+            window.addEventListener('resize', onWindowResize, false);
+
+        }
+
+        function createFloor() {
+            var quality = 22, step = 1024 / quality;
+            var plane = new THREE.PlaneGeometry(2000, 2000, quality - 1, quality - 1);
+            plane.applyMatrix(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+
+            for (var i = 0, l = plane.vertices.length; i < l; i++) {
+
+                var x = i % quality, y = ~~(i / quality);
+                plane.vertices[i].y = Math.random() * 30;
+
+            }
+
+            plane.computeCentroids();
+
+            var initColor = new THREE.Color(0x497f13);
+            var initTexture = THREE.ImageUtils.generateDataTexture(1, 1, initColor);
+
+            var groundMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff, specular: 0x111111, map: initTexture });
+
+            var groundTexture = THREE.ImageUtils.loadTexture("floor.jpg", undefined, function () { groundMaterial.map = groundTexture });
+            groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+            groundTexture.repeat.set(25, 25);
+            groundTexture.anisotropy = 16;          
+
+            mesh = new THREE.Mesh(plane, groundMaterial);
+            mesh.position.y = -1;
+            //mesh.rotation.x = -Math.PI / 2;
+            scene.add(mesh);
+        }
+
+        function createTriangles() {           
+            var geometry = new THREE.Geometry();
+            var materials = [];
+            var colors = [
+                   '0xdee7ec',
+                   '0xb1bec4',
+                   '0xe8f2f4'
+            ];
+
+            for (var ix = 0; ix < AMOUNTX; ix++) {
+                for (var iy = 0; iy < AMOUNTY; iy++) {
+
+                    var radius = 250;
+                    var x = randomMinMax(-50, 50) + (Math.cos(iy) * radius);
+                    var z = randomMinMax(-50, 50) + (Math.sin(iy) * radius);
+
+                    var v = new THREE.Vector3(x, randomMinMax(0, 100), z);
+
+                    var width = 15,
+                        height = 7;
+
+                    var v0 = new THREE.Vector3(Math.random() * width - height, Math.random() * width - height, Math.random() * width - height);
+                    var v1 = new THREE.Vector3(Math.random() * width - height, Math.random() * width - height, Math.random() * width - height);
+                    var v2 = new THREE.Vector3(Math.random() * width - height, Math.random() * width - height, Math.random() * width - height);
+
+                    v0.add(v);
+                    v1.add(v);
+                    v2.add(v);
+
+                    var face = new THREE.Face3(geometry.vertices.push(v0) - 1, geometry.vertices.push(v1) - 1, geometry.vertices.push(v2) - 1, null, null, iy);
+
+                    geometry.faces.push(face);
+
+               
+                    var color = colors[parseInt(randomMinMax(0, 2))];
+
+                    materials.push(new THREE.MeshPhongMaterial({ color: color, side: THREE.DoubleSide }));
+                }
+            }
+
+            geometry.computeFaceNormals();
+            geometry.computeCentroids();
+
+            group = new THREE.Object3D();
+            group.scale.x = group.scale.y = group.scale.z = 2;
+            scene.add(group);
+
+            mesh = new THREE.Mesh(geometry, new THREE.MeshPhongMaterial(materials));
+            mesh.material.transparent = true;
+            mesh.material.opacity = 0.3;
+            group.add(mesh);
+            group.name = "triangles";
+        }
+
+        function randomMinMax(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        function onWindowResize() {
+
+            windowHalfX = window.innerWidth / 2;
+            windowHalfY = window.innerHeight / 2;
+
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+        }
+
+        //
+
+        function onDocumentMouseMove(event) {
+
+            mouseX = event.clientX - windowHalfX;
+            mouseY = event.clientY - windowHalfY;
+
+        }
+
+        function onDocumentTouchStart(event) {
+
+            if (event.touches.length === 1) {
+
+                event.preventDefault();
+
+                mouseX = event.touches[0].pageX - windowHalfX;
+                mouseY = event.touches[0].pageY - windowHalfY;
+
+            }
+
+        }
+
+        function onDocumentTouchMove(event) {
+
+            if (event.touches.length === 1) {
+
+                event.preventDefault();
+
+                mouseX = event.touches[0].pageX - windowHalfX;
+                mouseY = event.touches[0].pageY - windowHalfY;
+
+            }
+
+        }
+
+        //
+
+        function animate() {
+
+            requestAnimationFrame(animate);
+
+            render();
+            stats.update();
+
+        }
+
+        function render() {
+
+            camera.position.x += (mouseX - camera.position.x) * .05;
+            camera.position.y += (-mouseY - camera.position.y) * .05;
+    
+            camera.lookAt(cube.position);
+
+            var triangles = scene.getChildByName("triangles");
+
+            triangles.rotation.y += 0.002;
+
+            renderer.render(scene, camera);
+
+            count += 0.1;
+
+        }
+
+		</script>
+</body>
+</html>
